@@ -1,0 +1,6 @@
+# The Web profile already supplies native pi-ai, credentials and settings.
+- insert:
+    - id: authorization
+      name: '@deepseek-ai/dsh-authorization'
+    - id: subscription-bridge
+      name: dsh-subscription-bridge
