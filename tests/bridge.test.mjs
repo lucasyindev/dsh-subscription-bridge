@@ -163,7 +163,7 @@ test('exact official routes reject malformed input without touching the Gateway 
   const routes = new Map()
   ctx.provide('connection', { rpc: { intercept() { assert.fail('The /api interceptor belongs exclusively to the official Gateway') }, handle() { assert.fail('Use exact routes, not a new physical transport') } }, fetch: { register(route) { assert(route.path.startsWith(`${RPC_CHANNEL}/${RPC_PREFIX}`)); routes.set(route.path, route); return async () => {} } } })
   apply(ctx)
-  assert.equal(routes.size, 6)
+  assert.equal(routes.size, 7)
   const handler = async (endpoint, payload) => {
     const route = routes.get(`${RPC_CHANNEL}/${endpoint}`)
     if (!route) return { ok: false }

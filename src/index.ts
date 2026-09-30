@@ -1,4 +1,4 @@
-/** Native OAuth surface: no credential payload reads, provider adapters or token files. */
+/** Native OAuth surface with account-scoped model discovery; no private token files. */
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
@@ -9,12 +9,13 @@ import type {} from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
 import { clientRequestSchema } from '@deepseek-ai/dsh-client-connection'
 import type { FlowView, PromptView } from './types.js'
+import { CodexCatalog } from './catalog.js'
 
 export const name = 'subscription-bridge'
 export const inject = ['authorization', 'credentials', 'connection', 'settings', 'llm']
 export const RPC_PREFIX = 'subscription-bridge.'
 export const RPC_CHANNEL = '/api'
-const actions = new Set(['list', 'begin', 'answer', 'cancel', 'signOut', 'enable'])
+const actions = new Set(['list', 'begin', 'answer', 'cancel', 'signOut', 'enable', 'refreshCatalog'])
 interface Pending { view: PromptView; resolve(value: string): void; reject(reason: Error): void; cleanup(): void }
 interface Attempt { controller: AbortController; done: Promise<void>; state: FlowView['outcome']; prompts: Map<string, Pending>; notice?: FlowView['notice'] }
 class Refusal extends Error { constructor(readonly code: string) { super(code) } }
@@ -24,7 +25,11 @@ export class SubscriptionBridge {
   private readonly attempts = new Map<CredentialKey, Attempt>()
   private readonly deleting = new Set<CredentialKey>()
   private disposed = false
-  constructor(private readonly ctx: Context) {}
+  readonly catalog: CodexCatalog
+  constructor(private readonly ctx: Context) {
+    this.catalog = new CodexCatalog(ctx, () => !this.disposed && !this.deleting.has(credentialKey('llm-pi-ai', 'openai-codex')) && !this.ctx.authorization.describe(credentialKey('llm-pi-ai', 'openai-codex'))?.inFlight,
+      () => this.route(credentialKey('llm-pi-ai', 'openai-codex')))
+  }
 
   private flows(): readonly AuthorizationEntry[] {
     return this.ctx.authorization.list().filter(flow => flow.key.startsWith('llm-pi-ai/') && flow.methods.some(method => method.id === 'oauth'))
@@ -58,6 +63,7 @@ export class SubscriptionBridge {
       return { ...flow, inFlight: flow.inFlight || (attempt !== undefined && attempt.state === undefined),
         credential: await this.ctx.credentials.describeRecord(flow.key),
         enabled: registered.has(flow.key.slice('llm-pi-ai/'.length)), keyReference,
+        ...(flow.key === 'llm-pi-ai/openai-codex' ? { catalog: { ...this.catalog.status } } : {}),
         prompts: attempt ? [...attempt.prompts.values()].map(pending => pending.view) : [],
         ...(attempt?.notice ? { notice: attempt.notice } : {}),
         ...(attempt?.state ? { outcome: attempt.state } : {}),
@@ -146,6 +152,7 @@ export class SubscriptionBridge {
     if (this.ctx.authorization.describe(key)?.inFlight && (!attempt || attempt.state !== undefined)) throw new Refusal('not-owned')
     this.deleting.add(key)
     try {
+      if (key === 'llm-pi-ai/openai-codex') { this.catalog.invalidate(); await this.catalog.settle() }
       if (attempt) { attempt.controller.abort(); this.ctx.authorization.cancel(key); await attempt.done }
       const info = await this.ctx.credentials.describeRecord(key)
       if (info.configured && info.kind !== 'grant') throw new Refusal('not-grant')
@@ -156,6 +163,7 @@ export class SubscriptionBridge {
   /** Plugin unload stops and awaits owned conversations, with no credential deletion. */
   async dispose(): Promise<void> {
     this.disposed = true
+    await this.catalog.dispose()
     for (const [key, attempt] of this.attempts) { attempt.controller.abort(); this.ctx.authorization.cancel(key) }
     await Promise.all([...this.attempts.values()].map(attempt => attempt.done))
     this.attempts.clear()
@@ -177,6 +185,7 @@ export function apply(ctx: Context): void {
     try {
       if (!endpoint.startsWith(RPC_PREFIX) || !actions.has(action) || !isObject(payload)) throw new Refusal('invalid-input')
       if (action === 'list') return { ok: true, value: await bridge.list() }
+      if (action === 'refreshCatalog') return { ok: true, value: await bridge.catalog.refresh() }
       const key = stringField(payload, 'key')
       switch (action) {
         case 'begin': bridge.begin(key); break

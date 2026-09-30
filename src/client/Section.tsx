@@ -44,6 +44,8 @@ function Flow({ flow, api, t, refresh, unavailable }: { flow: FlowView; api: Bri
         </> : <button className="sb-primary" disabled={disabled || apiKey || !flow.credential.writable} onClick={() => void action('begin')}>{t('connect')}</button>}
     </div></div>
     {flow.keyReference && <p>{t('keyReference')}</p>}
+    {connected && flow.catalog && <p className="sb-status" role="status">{t(flow.catalog.state === 'fresh' ? 'catalogFresh' : flow.catalog.state === 'loading' ? 'catalogLoading' : flow.catalog.state === 'stale' ? 'catalogStale' : 'catalogAutomatic')}
+      {flow.catalog.refreshedAt && <> · {new Date(flow.catalog.refreshedAt).toLocaleTimeString()}</>}</p>}
     {flow.notice && <div className="sb-notice"><p>{flow.notice.message}</p>{link && <a className="sb-link" href={link} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">{t('open')}</a>}{flow.notice.code && <p>{t('code')}: <code>{flow.notice.code}</code></p>}</div>}
     {flow.prompts.map(prompt => <Prompt key={prompt.id} item={prompt} busy={disabled} t={t} answer={value => action('answer', { id: prompt.id, value })} />)}
     {flow.outcome && flow.outcome !== 'authorized' && <p role={flow.outcome === 'cancelled' ? 'status' : 'alert'}>{t(flow.outcome === 'enable-failed' ? 'enableFailed' : flow.outcome === 'cancelled' ? 'cancelled' : 'failed')}</p>}
